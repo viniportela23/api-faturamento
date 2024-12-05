@@ -7,26 +7,6 @@ ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 /*
 
-
-
-n sei se funciona mas colocar quando tiver em producao
-$ipsPermitidos = [
-    '186.209.135.27', // Seu IP
-    '162.240.161.86', // IP do servidor
-    '162.240.161.70'  // Outro IP do servidor
-];
- 
-// Captura o IP do cliente
-$ipCliente = $_SERVER['REMOTE_ADDR'];
-
-// Verifica se o IP do cliente está na lista de IPs permitidos
-if (!in_array($ipCliente, $ipsPermitidos)) {
-    // Se o IP não estiver permitido, retorna um erro 403 (Proibido)
-    http_response_code(403);
-    echo "Acesso negado. Seu IP não tem permissão para acessar este recurso.";
-    exit();
-}*/
-
 // Se o IP estiver permitido, continua com a configuração de CORS
 header("Access-Control-Allow-Origin: *"); // Permitir apenas o IP do cliente
 header("Access-Control-Allow-Methods: POST, GET, OPTIONS, FILES");
