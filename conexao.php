@@ -1,6 +1,6 @@
 <?php
 // Caminho para o arquivo de credenciais
-$credenciais_file = __DIR__ . '/../credenciais_banco.txt';
+$credenciais_file = __DIR__ . '/../banco_faturamento.txt';
 
 // Verifica se o arquivo de credenciais existe
 if (!file_exists($credenciais_file)) {
