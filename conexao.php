@@ -24,4 +24,6 @@ function conectarBanco() {
         die("Erro ao conectar ao banco de dados: " . $e->getMessage());
     }
 }
+$conn = conectarBanco(); // Conexão disponível globalmente
+
 ?>

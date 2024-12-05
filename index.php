@@ -19,56 +19,82 @@ header('Content-Type: application/json'); // Define o cabeçalho JSON
 
 // Verifica se a requisição é POST e se é uma solicitação de login
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tipo']) && $_POST['tipo'] == 'login') {
-    $usuario = $_POST['usuario'] ?? null; // Agora usa $_POST
-    $senha = $_POST['senha'] ?? null; // Agora usa $_POST
+    $email = $_POST['email'] ?? null; // Agora usa $_POST
+    $senha = $_POST['senha'] ?? null; 
 
-    if ($usuario && $senha) {
+    if ($email && $senha) {
         // Inclui o arquivo de consulta ao banco somente quando necessário
         require_once 'banco.php';
 
         // Chama a função de verificação no banco
-        $resPOSTaBanco = verificaUsuario($senha, $usuario);
+        $respostaBanco = verificaUsuario($email, $senha);
 
-        if ($resPOSTaBanco['status'] == 'sucesso') {
+        if ($respostaBanco['status'] === 'sucesso') {
             require_once 'token.php';
             // Inclui o arquivo de geração do token somente quando necessário
-            // $token = criaToken($respostaBanco['id'], $resPOSTaBanco['nivel']);
+            // $token = criaToken($respostaBanco['id'], $respostaBanco['nivel']);
 
-            $token = criaToken($respostaBanco['id']);
+            $token = criaToken($respostaBanco['id'], $respostaBanco['nivel'], $respostaBanco['nome']);
 
-            if ($token !== null) {
-
-                $veirificaAssinatura = ajustaNivel($resPOSTaBanco['user_id']);
-
-                if ($veirificaAssinatura['status'] == 'sucesso') {
-                    http_response_code(200);
-                    // Envia a resPOSTa final para controle_login com o token
-                    echo json_encode([
-                        'status' => 'sucesso', 
-                        'token' => $token]);
-                } else {
-                    http_response_code(500);
-                    // Erro na validação de usuário
-                    echo json_encode(['status' => 'erro', 'mensagem' => 'Erro verificar dados no banco.']);
-                }
-
+            if ($token['status'] === 'sucesso') {
+                http_response_code(200);
+                // Envia a resPOSTa final para controle_login com o token
+                echo json_encode([
+                    'status' => 'sucesso', 
+                    'nivel' => $respostaBanco['nivel'], 
+                    'token' => $token['token']]);
             } else {
                 http_response_code(500);
                 // Erro na validação de usuário
-                echo json_encode(['status' => 'erro', 'mensagem' => 'Erro ao gerrar token do usuario.']);
+                echo json_encode(['status' => 'erro', 'mensagem' => $token['mensagem'] ?? 'Erro ao gerrar token do usuario.']);
             }
         } else {
            http_response_code(422);
             // Erro na validação de usuário
-            echo json_encode(['status' => 'erro', 'mensagem' => $resPOSTaBanco['mensagem']]);
+            echo json_encode(['status' => 'erro', 'mensagem' => $respostaBanco['mensagem']]);
         }
     } else {
        http_response_code(422);
         echo json_encode(['status' => 'erro', 'mensagem' => 'Dados incompletos.']);
     }
-//} elseif ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tipo']) && $_POST['tipo'] == 'categoria-banner') {
-  //  $token = $_POST['token'] ?? null;
+} elseif ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tipo']) && $_POST['tipo'] == 'dashboard-cliente') {
+    $token = $_POST['token'] ?? null;
 
+    if ($token) {
+        // Inclui o arquivo de consulta ao banco somente quando necessário
+        require_once 'token.php';
+
+        $token = verificaToken($token);
+
+        if ($token['status'] === 'sucesso' && $token['nivel'] === 'cliente') {
+            require_once 'banco.php';
+
+            $respostaBanco = consultaPediodos($token['userId']);
+
+            if ($token['status'] === 'sucesso') {
+
+                http_response_code(200);
+                // Envia a resPOSTa final para controle_login com o token
+                echo json_encode([
+                    'status' => 'sucesso', 
+                    'dados' => $respostaBanco['dados'],
+                    'nome' => $token['nome'],                   
+                    'token' => $token['token']]);
+            } else {
+                http_response_code(500);
+                // Erro na validação de usuário
+                echo json_encode(['status' => 'erro', 'mensagem' => $respostaBanco['mensagem']]);
+
+            }
+        } else {
+            http_response_code(422);
+            // Erro na validação de usuário
+            echo json_encode(['status' => 'erro', 'mensagem' => $token['mensagem'] ?? 'Erro ao gerrar token do usuario.']);
+        }
+    } else {
+        http_response_code(422);
+        echo json_encode(['status' => 'erro', 'mensagem' => 'Dados incompletos.']);
+    }
 } else {
     //http_response_code(404);
     echo json_encode([
