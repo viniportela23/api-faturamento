@@ -6,6 +6,7 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 /*
+*/
 
 // Se o IP estiver permitido, continua com a configuração de CORS
 header("Access-Control-Allow-Origin: *"); // Permitir apenas o IP do cliente
