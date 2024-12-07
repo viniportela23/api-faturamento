@@ -20,7 +20,7 @@ $key = trim(file_get_contents($keyPath)); // Remove espaços ou quebras de linha
 
 $project = 'jbl-faturamento';
 
-function criaToken($userId, $nivel, $nome) {
+function criaToken($userId, $nivel, $nome, $regime, $estado) {
     global $key;
     global $project;
 
@@ -36,6 +36,8 @@ function criaToken($userId, $nivel, $nome) {
             'createdAt' => $createdAt->format('Y-m-d H:i:s'), // Data de criação no formato desejado
             'project' => $project,
             'nome' => $nome,
+            'regime' => $regime,
+            'estado' => $estado,
         ];
 
         // Gera o token com a chave carregada
@@ -76,15 +78,19 @@ function verificaToken($token) {
         $userId = $decoded->sub;
         $nivel = $decoded->nivel;
         $nome = $decoded->nome;
+        $regime = $decoded->regime;
+        $estado = $decoded->estado;
 
         // Cria um novo token com base nas informações do token antigo
-        $novoToken = criaToken($userId, $nivel, $nome);
+        $novoToken = criaToken($userId, $nivel, $nome, $regime, $estado);
 
         return [
             'status' => 'sucesso',
             'userId' => $userId,
             'nivel' => $nivel,
             'nome' => $nome,
+            'regime' => $regime,
+            'estado' => $estado,
             'token' => $novoToken['token']
         ];
 
