@@ -53,33 +53,67 @@ function verificaUsuario($email, $senha) {
         'mensagem' => 'Conexão ao banco não disponível.'
     ];
 }
-function consultaPediodos($userId) {
+function consultaPedidos($userId) {
     global $conn; // Usa a conexão global
 
     if ($conn) {
         try {
-            // Consulta os pedidos do usuário no banco
+            // Consulta os pedidos e itens relacionados ao usuário
             $stmt = $conn->prepare("
-                SELECT p.nome AS produto_nome, pe.quantidade, pe.data_pedido, pe.status
+                SELECT
+                    pe.id AS pedido_id,
+                    pe.data_pedido,
+                    pe.status,
+                    pe.valor_total,
+                    p.nome AS produto_nome,
+                    i.quantidade,
+                    i.preco_unitario,
+                    i.total_item,
+                    p.codigo AS produto_codigo
                 FROM pedidos pe
-                INNER JOIN produtos p ON pe.produto_id = p.id
+                INNER JOIN itens_pedido i ON pe.id = i.pedido_id
+                INNER JOIN produtos p ON i.produto_id = p.id
                 WHERE pe.cliente_id = :id
                 ORDER BY pe.data_pedido DESC
             ");
-            $stmt->bindParam(':id', $userId, PDO::PARAM_STR);
+            $stmt->bindParam(':id', $userId, PDO::PARAM_INT);
             $stmt->execute();
 
             // Busca todos os registros
             $pedidosUsuario = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             if ($pedidosUsuario) {
+                // Organizar os dados de pedidos para retornar uma estrutura semelhante ao formato esperado
+                $pedidosComItens = [];
+                
+                foreach ($pedidosUsuario as $pedido) {
+                    // Organiza os pedidos por ID
+                    if (!isset($pedidosComItens[$pedido['pedido_id']])) {
+                        $pedidosComItens[$pedido['pedido_id']] = [
+                            'pedido_id' => $pedido['pedido_id'],
+                            'data_pedido' => $pedido['data_pedido'],
+                            'status' => $pedido['status'],
+                            'valor_total' => $pedido['valor_total'],
+                            'itens' => []
+                        ];
+                    }
+                    // Adiciona os itens ao pedido
+                    $pedidosComItens[$pedido['pedido_id']]['itens'][] = [
+                        'produto_nome' => $pedido['produto_nome'],
+                        'produto_codigo' => $pedido['produto_codigo'],
+                        'quantidade' => $pedido['quantidade'],
+                        'preco_unitario' => $pedido['preco_unitario'],
+                        'total_item' => $pedido['total_item']
+                    ];
+                }
+
                 return [
                     'status' => 'sucesso',
-                    'dados' => $pedidosUsuario
+                    'dados' => array_values($pedidosComItens) // Retorna os pedidos formatados
                 ];
             } else {
                 return [
-                    'status' => 'nemnhum',
+                    'status' => 'nenhum',
                     'mensagem' => 'Nenhum pedido encontrado para o usuário.'
                 ];
             }
@@ -175,39 +209,58 @@ function listarCarrinho($userId) {
 
     if ($conn) {
         try {
-            // Consulta para buscar os itens do carrinho do usuário
-            $stmt = $conn->prepare("
+            // Consulta para buscar o carrinho ativo do usuário
+            $stmtCarrinho = $conn->prepare("
+                SELECT id AS carrinho_id, status, data
+                FROM carrinho
+                WHERE usuario_id = :usuario_id AND status = 'ativo'
+            ");
+            $stmtCarrinho->bindParam(':usuario_id', $userId, PDO::PARAM_INT);
+            $stmtCarrinho->execute();
+            $carrinho = $stmtCarrinho->fetch(PDO::FETCH_ASSOC);
+
+            if (!$carrinho) {
+                return [
+                    'status' => 'erro',
+                    'mensagem' => 'Nenhum carrinho ativo encontrado para este usuário.'
+                ];
+            }
+
+            // Consulta para buscar os itens do carrinho
+            $stmtItens = $conn->prepare("
                 SELECT 
-                    c.id AS carrinho_id,
-                    p.id AS produto_id,
+                    ic.id AS item_carrinho_id,
+                    ic.produto_id,
                     p.nome AS nome_produto,
                     p.codigo AS codigo_produto,
                     p.cor AS cor_produto,
                     p.quantidade_minima,
                     p.imagem,
-                    c.quantidade,
-                    c.preco AS preco_unitario,
-                    (c.quantidade * c.preco) AS total_item,
-                    c.data_adicao
-                FROM carrinho c
-                INNER JOIN produtos p ON c.produto_id = p.id
-                WHERE c.cliente_id = :cliente_id
+                    ic.quantidade,
+                    ic.valor_unitario AS preco_unitario,
+                    (ic.quantidade * ic.valor_unitario) AS total_item,
+                    ic.data
+                FROM item_carrinho ic
+                INNER JOIN produtos p ON ic.produto_id = p.id
+                WHERE ic.carrinho_id = :carrinho_id
             ");
-            $stmt->bindParam(':cliente_id', $userId, PDO::PARAM_INT);
-            $stmt->execute();
-
-            // Busca todos os registros do carrinho
-            $itensCarrinho = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $stmtItens->bindParam(':carrinho_id', $carrinho['carrinho_id'], PDO::PARAM_INT);
+            $stmtItens->execute();
+            $itensCarrinho = $stmtItens->fetchAll(PDO::FETCH_ASSOC);
 
             if ($itensCarrinho) {
-                // Calcula o valor total do carrinho
-                $valorTotal = array_reduce($itensCarrinho, function ($total, $item) {
-                    return $total + $item['total_item'];
-                }, 0);
+                // Soma o valor total do carrinho com base nos itens
+                $valorTotal = 0;
+                foreach ($itensCarrinho as $item) {
+                    $valorTotal += $item['total_item'];
+                }
 
                 return [
                     'status' => 'sucesso',
                     'dados' => [
+                        'carrinho_id' => $carrinho['carrinho_id'],
+                        'status' => $carrinho['status'],
+                        'data' => $carrinho['data'],
                         'itens' => $itensCarrinho,
                         'valor_total' => $valorTotal
                     ]
@@ -236,6 +289,29 @@ function alteraQuantidadeProd($userId, $id_produto, $sinal, $estado, $regime) {
 
     if ($conn) {
         try {
+            // Verifica se existe um carrinho ativo para o usuário
+            $stmtCarrinho = $conn->prepare("
+                SELECT id 
+                FROM carrinho 
+                WHERE usuario_id = :usuario_id AND status = 'ativo'
+            ");
+            $stmtCarrinho->bindParam(':usuario_id', $userId);
+            $stmtCarrinho->execute();
+            $carrinho = $stmtCarrinho->fetch(PDO::FETCH_ASSOC);
+
+            if (!$carrinho) {
+                // Se não existir, cria um novo carrinho ativo
+                $stmtNovoCarrinho = $conn->prepare("
+                    INSERT INTO carrinho (usuario_id, data, status) 
+                    VALUES (:usuario_id, NOW(), 'ativo')
+                ");
+                $stmtNovoCarrinho->bindParam(':usuario_id', $userId);
+                $stmtNovoCarrinho->execute();
+                $carrinhoId = $conn->lastInsertId();
+            } else {
+                $carrinhoId = $carrinho['id'];
+            }
+
             // Busca o valor de quantidade mínima para o produto
             $stmtMinima = $conn->prepare("
                 SELECT quantidade_minima 
@@ -253,35 +329,34 @@ function alteraQuantidadeProd($userId, $id_produto, $sinal, $estado, $regime) {
                 ];
             }
 
-            // Consulta para buscar o item do carrinho do usuário
-            $stmt = $conn->prepare("
+            // Verifica se o produto já está no carrinho
+            $stmtItem = $conn->prepare("
                 SELECT quantidade 
-                FROM carrinho 
-                WHERE cliente_id = :cliente_id AND produto_id = :produto_id
+                FROM item_carrinho 
+                WHERE carrinho_id = :carrinho_id AND produto_id = :produto_id
             ");
-            $stmt->bindParam(':cliente_id', $userId);
-            $stmt->bindParam(':produto_id', $id_produto);
-            $stmt->execute();
-            $produtoCarrinho = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stmtItem->bindParam(':carrinho_id', $carrinhoId);
+            $stmtItem->bindParam(':produto_id', $id_produto);
+            $stmtItem->execute();
+            $itemCarrinho = $stmtItem->fetch(PDO::FETCH_ASSOC);
 
-            // Se o sinal for 'remover', deleta o produto diretamente do carrinho
             if ($sinal == 'remover') {
+                // Remove o item do carrinho
                 $stmtDelete = $conn->prepare("
-                    DELETE FROM carrinho 
-                    WHERE cliente_id = :cliente_id AND produto_id = :produto_id
+                    DELETE FROM item_carrinho 
+                    WHERE carrinho_id = :carrinho_id AND produto_id = :produto_id
                 ");
-                $stmtDelete->bindParam(':cliente_id', $userId);
+                $stmtDelete->bindParam(':carrinho_id', $carrinhoId);
                 $stmtDelete->bindParam(':produto_id', $id_produto);
                 $stmtDelete->execute();
 
                 return [
                     'status' => 'sucesso',
-                    'mensagem' => 'Item excluído com sucesso.'
+                    'mensagem' => 'Item removido do carrinho.'
                 ];
             }
 
-            // Se o produto não estiver no carrinho, cria um novo item
-            if (!$produtoCarrinho) {
+            if (!$itemCarrinho) {
                 if ($sinal == 'mais') {
                     // Busca o preço do produto baseado no estado e regime
                     $stmtPreco = $conn->prepare("
@@ -303,15 +378,15 @@ function alteraQuantidadeProd($userId, $id_produto, $sinal, $estado, $regime) {
                         ];
                     }
 
-                    // Insere um novo item no carrinho com a quantidade mínima
+                    // Adiciona um novo item ao carrinho
                     $stmtInsert = $conn->prepare("
-                        INSERT INTO carrinho (cliente_id, produto_id, quantidade, preco, data_adicao) 
-                        VALUES (:cliente_id, :produto_id, :quantidade_minima, :preco, NOW())
+                        INSERT INTO item_carrinho (carrinho_id, produto_id, quantidade, valor_unitario, data) 
+                        VALUES (:carrinho_id, :produto_id, :quantidade_minima, :valor_unitario, NOW())
                     ");
-                    $stmtInsert->bindParam(':cliente_id', $userId);
+                    $stmtInsert->bindParam(':carrinho_id', $carrinhoId);
                     $stmtInsert->bindParam(':produto_id', $id_produto);
                     $stmtInsert->bindParam(':quantidade_minima', $quantidadeMinima);
-                    $stmtInsert->bindParam(':preco', $preco);
+                    $stmtInsert->bindParam(':valor_unitario', $preco);
                     $stmtInsert->execute();
 
                     return [
@@ -319,55 +394,45 @@ function alteraQuantidadeProd($userId, $id_produto, $sinal, $estado, $regime) {
                         'mensagem' => 'Produto adicionado com sucesso.'
                     ];
                 }
-            }
-
-            // Caso o produto esteja no carrinho, realiza a alteração de quantidade
-            if ($produtoCarrinho) {
-                $novaQuantidade = $produtoCarrinho['quantidade'];
-                $mensagem = '';
+            } else {
+                // Atualiza a quantidade do item no carrinho
+                $novaQuantidade = $itemCarrinho['quantidade'];
 
                 if ($sinal == 'mais') {
                     $novaQuantidade += $quantidadeMinima;
-                    $mensagem = 'Item adicionado com sucesso.';
-                } elseif ($sinal == 'menos') {
-                    // Subtração respeitando a quantidade mínima
-                    if ($novaQuantidade > $quantidadeMinima) {
-                        $novaQuantidade -= $quantidadeMinima;
-                        $mensagem = 'Item subtraído com sucesso.';
-                    } else {
-                        // Se a quantidade for igual ou menor que a mínima, remove o item
-                        $stmtDelete = $conn->prepare("
-                            DELETE FROM carrinho 
-                            WHERE cliente_id = :cliente_id AND produto_id = :produto_id
-                        ");
-                        $stmtDelete->bindParam(':cliente_id', $userId);
-                        $stmtDelete->bindParam(':produto_id', $id_produto);
-                        $stmtDelete->execute();
+                } elseif ($sinal == 'menos' && $novaQuantidade > $quantidadeMinima) {
+                    $novaQuantidade -= $quantidadeMinima;
+                } else {
+                    // Remove o item se a quantidade for igual à mínima
+                    $stmtDelete = $conn->prepare("
+                        DELETE FROM item_carrinho 
+                        WHERE carrinho_id = :carrinho_id AND produto_id = :produto_id
+                    ");
+                    $stmtDelete->bindParam(':carrinho_id', $carrinhoId);
+                    $stmtDelete->bindParam(':produto_id', $id_produto);
+                    $stmtDelete->execute();
 
-                        return [
-                            'status' => 'sucesso',
-                            'mensagem' => 'Item removido do carrinho.'
-                        ];
-                    }
+                    return [
+                        'status' => 'sucesso',
+                        'mensagem' => 'Item removido do carrinho.'
+                    ];
                 }
 
-                // Atualiza a quantidade no banco de dados
                 $stmtUpdate = $conn->prepare("
-                    UPDATE carrinho 
-                    SET quantidade = :quantidade, data_adicao = NOW() 
-                    WHERE cliente_id = :cliente_id AND produto_id = :produto_id
+                    UPDATE item_carrinho 
+                    SET quantidade = :quantidade, data = NOW() 
+                    WHERE carrinho_id = :carrinho_id AND produto_id = :produto_id
                 ");
                 $stmtUpdate->bindParam(':quantidade', $novaQuantidade);
-                $stmtUpdate->bindParam(':cliente_id', $userId);
+                $stmtUpdate->bindParam(':carrinho_id', $carrinhoId);
                 $stmtUpdate->bindParam(':produto_id', $id_produto);
                 $stmtUpdate->execute();
 
                 return [
                     'status' => 'sucesso',
-                    'mensagem' => $mensagem
+                    'mensagem' => 'Quantidade atualizada com sucesso.'
                 ];
             }
-
         } catch (PDOException $e) {
             return [
                 'status' => 'erro',
@@ -405,10 +470,11 @@ function carregaInfoDashAdmin() {
             foreach ($diasDoMes as $dia) {
                 $dataDia = $mesAtual . '-' . str_pad($dia, 2, '0', STR_PAD_LEFT);
                 $stmt = $conn->prepare("
-                    SELECT SUM(preco * quantidade) AS total 
-                    FROM pedidos 
-                    INNER JOIN precos ON pedidos.produto_id = precos.produto_id
-                    WHERE DATE(data_pedido) = :dataDia AND precos.estado = :estado
+                    SELECT SUM(i.quantidade * p.preco) AS total 
+                    FROM pedidos ped
+                    INNER JOIN itens_pedido i ON ped.id = i.pedido_id
+                    INNER JOIN precos p ON i.produto_id = p.produto_id
+                    WHERE DATE(ped.data_pedido) = :dataDia AND p.estado = :estado
                 ");
                 $stmt->bindParam(':dataDia', $dataDia);
                 $stmt->bindParam(':estado', $estado);
@@ -445,10 +511,11 @@ function carregaInfoDashAdmin() {
         $totalPedidosAno = $stmtPedidosAno->fetchColumn();
 
         $stmtVendasTotaisMes = $conn->prepare("
-            SELECT SUM(preco * quantidade) AS total 
-            FROM pedidos 
-            INNER JOIN precos ON pedidos.produto_id = precos.produto_id
-            WHERE DATE_FORMAT(data_pedido, '%Y-%m') = :mesAtual
+            SELECT SUM(i.quantidade * p.preco) AS total 
+            FROM pedidos ped
+            INNER JOIN itens_pedido i ON ped.id = i.pedido_id
+            INNER JOIN precos p ON i.produto_id = p.produto_id
+            WHERE DATE_FORMAT(ped.data_pedido, '%Y-%m') = :mesAtual
         ");
         $stmtVendasTotaisMes->bindParam(':mesAtual', $mesAtual);
         $stmtVendasTotaisMes->execute();
@@ -631,38 +698,66 @@ function listaPedidosAdmin() {
 
     if ($conn) {
         try {
-            // Consulta os pedidos do usuário no banco
+            // Consulta os pedidos com informações gerais
             $stmt = $conn->prepare("
                 SELECT 
                     pe.id AS pedido_id, 
-                    c.nome AS cliente_nome, 
-                    c.email AS cliente_email,
-                    p.nome AS produto_nome, 
-                    p.codigo AS produto_codigo,
-                    pe.quantidade, 
                     pe.data_pedido, 
-                    pe.status
+                    pe.status, 
+                    pe.valor_total, 
+                    c.id AS cliente_id, 
+                    c.nome AS cliente_nome, 
+                    c.email AS cliente_email
                 FROM pedidos pe
                 INNER JOIN clientes c ON pe.cliente_id = c.id
-                INNER JOIN produtos p ON pe.produto_id = p.id
                 ORDER BY pe.data_pedido DESC
             ");
             $stmt->execute();
+            $pedidos = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-            // Busca todos os registros
-            $listaPedidosA = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-            if ($listaPedidosA) {
-                return [
-                    'status' => 'sucesso',
-                    'dados' => $listaPedidosA
-                ];
-            } else {
+            if (!$pedidos) {
                 return [
                     'status' => 'erro',
                     'mensagem' => 'Nenhum pedido encontrado.'
                 ];
             }
+
+            // Consulta os itens dos pedidos
+            $stmt = $conn->prepare("
+                SELECT 
+                    ip.pedido_id, 
+                    ip.produto_id, 
+                    ip.quantidade, 
+                    ip.preco_unitario, 
+                    ip.total_item, 
+                    p.nome AS produto_nome, 
+                    p.codigo AS produto_codigo
+                FROM itens_pedido ip
+                INNER JOIN produtos p ON ip.produto_id = p.id
+                ORDER BY ip.pedido_id
+            ");
+            $stmt->execute();
+            $itensPedidos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            // Estruturar os dados com os itens associados a cada pedido
+            $dadosPedidos = [];
+            foreach ($pedidos as $pedido) {
+                $pedidoId = $pedido['pedido_id'];
+                $dadosPedidos[$pedidoId] = $pedido;
+                $dadosPedidos[$pedidoId]['itens'] = [];
+            }
+
+            foreach ($itensPedidos as $item) {
+                $pedidoId = $item['pedido_id'];
+                if (isset($dadosPedidos[$pedidoId])) {
+                    $dadosPedidos[$pedidoId]['itens'][] = $item;
+                }
+            }
+
+            return [
+                'status' => 'sucesso',
+                'dados' => array_values($dadosPedidos)
+            ];
         } catch (PDOException $e) {
             return [
                 'status' => 'erro',
@@ -878,6 +973,91 @@ function atualizarProduto($nome, $codigo, $cor, $quant_minima, $imagem, $real_rs
                 'mensagem' => 'Produto atualizado com sucesso.'
             ];
 
+        } catch (PDOException $e) {
+            return [
+                'status' => 'erro',
+                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    return [
+        'status' => 'erro',
+        'mensagem' => 'Conexão ao banco não disponível.'
+    ];
+}
+function criarPedido($userId) {
+    global $conn; // Usa a conexão global
+
+    if ($conn) {
+        try {
+            // 1. Encontrar o carrinho ativo do usuário
+            $stmt = $conn->prepare("SELECT id FROM carrinho WHERE usuario_id = :userId AND status = 'ativo' LIMIT 1");
+            $stmt->bindParam(':userId', $userId, PDO::PARAM_INT);
+            $stmt->execute();
+            $carrinho = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$carrinho) {
+                return [
+                    'status' => 'erro',
+                    'mensagem' => 'Nenhum carrinho ativo encontrado para o usuário.'
+                ];
+            }
+
+            $carrinhoId = $carrinho['id'];
+
+            // 2. Buscar itens do carrinho
+            $stmt = $conn->prepare("SELECT ic.produto_id, ic.quantidade, ic.valor_unitario, 
+                                    (ic.quantidade * ic.valor_unitario) AS total_item
+                                    FROM item_carrinho ic
+                                    WHERE ic.carrinho_id = :carrinhoId");
+            $stmt->bindParam(':carrinhoId', $carrinhoId, PDO::PARAM_INT);
+            $stmt->execute();
+            $itensCarrinho = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            if (empty($itensCarrinho)) {
+                return [
+                    'status' => 'erro',
+                    'mensagem' => 'O carrinho está vazio.'
+                ];
+            }
+
+            // 3. Calcular o valor total do pedido
+            $valorTotal = 0;
+            foreach ($itensCarrinho as $item) {
+                $valorTotal += $item['total_item'];
+            }
+
+            // 4. Inserir o pedido na tabela 'pedidos'
+            $stmt = $conn->prepare("INSERT INTO pedidos (cliente_id, valor_total, status) 
+                                    VALUES (:userId, :valorTotal, 'pendente')");
+            $stmt->bindParam(':userId', $userId, PDO::PARAM_INT);
+            $stmt->bindParam(':valorTotal', $valorTotal, PDO::PARAM_STR);
+            $stmt->execute();
+            $pedidoId = $conn->lastInsertId(); // Pega o ID do pedido inserido
+
+            // 5. Inserir os itens na tabela 'itens_pedido'
+            foreach ($itensCarrinho as $item) {
+                $stmt = $conn->prepare("INSERT INTO itens_pedido (pedido_id, produto_id, quantidade, preco_unitario, total_item) 
+                                        VALUES (:pedidoId, :produtoId, :quantidade, :precoUnitario, :totalItem)");
+                $stmt->bindParam(':pedidoId', $pedidoId, PDO::PARAM_INT);
+                $stmt->bindParam(':produtoId', $item['produto_id'], PDO::PARAM_INT);
+                $stmt->bindParam(':quantidade', $item['quantidade'], PDO::PARAM_INT);
+                $stmt->bindParam(':precoUnitario', $item['valor_unitario'], PDO::PARAM_STR);
+                $stmt->bindParam(':totalItem', $item['total_item'], PDO::PARAM_STR);
+                $stmt->execute();
+            }
+
+            // 6. Alterar o status do carrinho para 'finalizado'
+            $stmt = $conn->prepare("UPDATE carrinho SET status = 'finalizado' WHERE id = :carrinhoId");
+            $stmt->bindParam(':carrinhoId', $carrinhoId, PDO::PARAM_INT);
+            $stmt->execute();
+
+            return [
+                'status' => 'sucesso',
+                'mensagem' => 'Pedido criado com sucesso.',
+                'pedido_id' => $pedidoId
+            ];
         } catch (PDOException $e) {
             return [
                 'status' => 'erro',

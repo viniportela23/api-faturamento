@@ -66,7 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tipo']) && $_POST['tip
         if ($token['status'] === 'sucesso' && $token['nivel'] === 'cliente') {
             require_once 'banco.php';
 
-            $respostaBanco = consultaPediodos($token['userId']);
+            $respostaBanco = consultaPedidos($token['userId']);
 
             if ($respostaBanco['status'] === 'sucesso') {
                 http_response_code(200);
@@ -640,6 +640,43 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tipo']) && $_POST['tip
                 echo json_encode([
                     'status' => 'sucesso',
                     'dados' => $respostaBanco['dados'],
+                    'token' => $token['token']]);
+            } else {
+                http_response_code(500);
+                // Erro na validação de usuário
+                echo json_encode(['status' => 'erro', 'mensagem' => $respostaBanco['mensagem']]);
+
+            }
+        } else {
+            http_response_code(422);
+            // Erro na validação de usuário
+            echo json_encode(['status' => 'erro', 'mensagem' => $token['mensagem'] ?? 'Erro ao gerrar token do usuario.']);
+        }
+    } else {
+        http_response_code(422);
+        echo json_encode(['status' => 'erro', 'mensagem' => 'Dados incompletos.']);
+    }
+} elseif ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tipo']) && $_POST['tipo'] == 'finalizar-pedido') {
+    $token = $_POST['token'] ?? null;
+
+    if ($token) {
+        // Inclui o arquivo de consulta ao banco somente quando necessário
+        require_once 'token.php';
+
+        $token = verificaToken($token);
+
+        if ($token['status'] === 'sucesso' && $token['nivel'] === 'cliente') {
+            require_once 'banco.php';
+
+            $respostaBanco = criarPedido($token['userId']);
+
+            if ($respostaBanco['status'] === 'sucesso') {
+
+                http_response_code(200);
+
+                echo json_encode([
+                    'status' => 'sucesso',
+                    'mensagem' => $respostaBanco['mensagem'],
                     'token' => $token['token']]);
             } else {
                 http_response_code(500);
