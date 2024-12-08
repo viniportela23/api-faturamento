@@ -79,7 +79,7 @@ function consultaPediodos($userId) {
                 ];
             } else {
                 return [
-                    'status' => 'erro',
+                    'status' => 'nemnhum',
                     'mensagem' => 'Nenhum pedido encontrado para o usuário.'
                 ];
             }
@@ -113,7 +113,7 @@ function consultaProdutos($busca, $estado, $regime, $nivel) {
 
             if ($nivel === 'cliente') {
                 $query = "
-                    SELECT p.id, p.nome, p.codigo, p.cor, p.imagem, pr.preco 
+                    SELECT p.id, p.nome, p.codigo, p.cor, p.imagem, p.quantidade_minima, pr.preco 
                     FROM produtos p
                     INNER JOIN precos pr ON p.id = pr.produto_id
                     WHERE pr.estado = :estado AND pr.regime = :regime AND ($condicoesBusca) AND p.ativo = 1
@@ -129,7 +129,7 @@ function consultaProdutos($busca, $estado, $regime, $nivel) {
                 }
             } else { // Admin
                 $query = "
-                    SELECT p.id, p.nome, p.codigo, p.cor, p.imagem 
+                    SELECT p.id, p.nome, p.codigo, p.cor, p.imagem, p.quantidade_minima
                     FROM produtos p
                     WHERE ($condicoesBusca) AND p.ativo = 1
                 ";
@@ -183,6 +183,7 @@ function listarCarrinho($userId) {
                     p.nome AS nome_produto,
                     p.codigo AS codigo_produto,
                     p.cor AS cor_produto,
+                    p.quantidade_minima,
                     p.imagem,
                     c.quantidade,
                     c.preco AS preco_unitario,
@@ -235,9 +236,27 @@ function alteraQuantidadeProd($userId, $id_produto, $sinal, $estado, $regime) {
 
     if ($conn) {
         try {
+            // Busca o valor de quantidade mínima para o produto
+            $stmtMinima = $conn->prepare("
+                SELECT quantidade_minima 
+                FROM produtos 
+                WHERE id = :produto_id
+            ");
+            $stmtMinima->bindParam(':produto_id', $id_produto);
+            $stmtMinima->execute();
+            $quantidadeMinima = $stmtMinima->fetchColumn();
+
+            if ($quantidadeMinima === false || $quantidadeMinima <= 0) {
+                return [
+                    'status' => 'erro',
+                    'mensagem' => 'Quantidade mínima inválida para este produto.'
+                ];
+            }
+
             // Consulta para buscar o item do carrinho do usuário
             $stmt = $conn->prepare("
-                SELECT quantidade FROM carrinho 
+                SELECT quantidade 
+                FROM carrinho 
                 WHERE cliente_id = :cliente_id AND produto_id = :produto_id
             ");
             $stmt->bindParam(':cliente_id', $userId);
@@ -264,7 +283,7 @@ function alteraQuantidadeProd($userId, $id_produto, $sinal, $estado, $regime) {
             // Se o produto não estiver no carrinho, cria um novo item
             if (!$produtoCarrinho) {
                 if ($sinal == 'mais') {
-                    // Consulta para buscar o preço do produto baseado no estado e regime
+                    // Busca o preço do produto baseado no estado e regime
                     $stmtPreco = $conn->prepare("
                         SELECT pr.preco
                         FROM produtos p
@@ -284,13 +303,14 @@ function alteraQuantidadeProd($userId, $id_produto, $sinal, $estado, $regime) {
                         ];
                     }
 
-                    // Insere um novo item no carrinho com quantidade 1 e o preço do produto
+                    // Insere um novo item no carrinho com a quantidade mínima
                     $stmtInsert = $conn->prepare("
                         INSERT INTO carrinho (cliente_id, produto_id, quantidade, preco, data_adicao) 
-                        VALUES (:cliente_id, :produto_id, 1, :preco, NOW())
+                        VALUES (:cliente_id, :produto_id, :quantidade_minima, :preco, NOW())
                     ");
                     $stmtInsert->bindParam(':cliente_id', $userId);
                     $stmtInsert->bindParam(':produto_id', $id_produto);
+                    $stmtInsert->bindParam(':quantidade_minima', $quantidadeMinima);
                     $stmtInsert->bindParam(':preco', $preco);
                     $stmtInsert->execute();
 
@@ -303,14 +323,19 @@ function alteraQuantidadeProd($userId, $id_produto, $sinal, $estado, $regime) {
 
             // Caso o produto esteja no carrinho, realiza a alteração de quantidade
             if ($produtoCarrinho) {
-                // Calcula a nova quantidade baseada no sinal (+ ou -)
+                $novaQuantidade = $produtoCarrinho['quantidade'];
+                $mensagem = '';
+
                 if ($sinal == 'mais') {
-                    $novaQuantidade = $produtoCarrinho['quantidade'] + 1;
+                    $novaQuantidade += $quantidadeMinima;
                     $mensagem = 'Item adicionado com sucesso.';
                 } elseif ($sinal == 'menos') {
-                    // Se a quantidade for 1 ou menor, o item será removido
-                    if ($produtoCarrinho['quantidade'] <= 1) {
-                        // Deletando o item do carrinho
+                    // Subtração respeitando a quantidade mínima
+                    if ($novaQuantidade > $quantidadeMinima) {
+                        $novaQuantidade -= $quantidadeMinima;
+                        $mensagem = 'Item subtraído com sucesso.';
+                    } else {
+                        // Se a quantidade for igual ou menor que a mínima, remove o item
                         $stmtDelete = $conn->prepare("
                             DELETE FROM carrinho 
                             WHERE cliente_id = :cliente_id AND produto_id = :produto_id
@@ -321,12 +346,8 @@ function alteraQuantidadeProd($userId, $id_produto, $sinal, $estado, $regime) {
 
                         return [
                             'status' => 'sucesso',
-                            'mensagem' => 'Item excluído com sucesso.'
+                            'mensagem' => 'Item removido do carrinho.'
                         ];
-                    } else {
-                        // Subtrai 1 da quantidade
-                        $novaQuantidade = $produtoCarrinho['quantidade'] - 1;
-                        $mensagem = 'Item subtraído com sucesso.';
                     }
                 }
 
@@ -454,6 +475,104 @@ function carregaInfoDashAdmin() {
             'mensagem' => 'Erro no banco: ' . $e->getMessage()
         ];
     }
+}
+function listaUsuarios() {
+    global $conn; // Usa a conexão global
+
+    if ($conn) {
+        try {
+            // Consulta os pedidos do usuário no banco
+            $stmt = $conn->prepare("
+                SELECT *
+                FROM clientes
+                ORDER BY 
+                    CASE 
+                        WHEN tipo = 'admin' THEN 1 
+                        ELSE 2 
+                    END;
+            ");
+            $stmt->execute();
+
+            // Busca todos os registros
+            $listaUsuarios = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            if ($listaUsuarios) {
+                return [
+                    'status' => 'sucesso',
+                    'dados' => $listaUsuarios
+                ];
+            } else {
+                return [
+                    'status' => 'erro',
+                    'mensagem' => 'Nenhum Usuario encontrado.'
+                ];
+            }
+        } catch (PDOException $e) {
+            return [
+                'status' => 'erro',
+                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    return [
+        'status' => 'erro',
+        'mensagem' => 'Conexão ao banco não disponível.'
+    ];
+}
+function cadastraUsuarios($nome, $email, $senha, $estado, $regime_fiscal, $tipo) {
+    global $conn; // Usa a conexão global
+
+    if ($conn) {
+        try {
+            // Verifica se já existe um usuário com o mesmo e-mail
+            $stmt = $conn->prepare("SELECT id FROM clientes WHERE email = :email");
+            $stmt->bindParam(':email', $email, PDO::PARAM_STR); // Vincula o parâmetro nomeado
+            $stmt->execute();
+            $usuarioExistente = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if ($usuarioExistente) {
+                // Se o e-mail já existir, retorna um erro
+                return [
+                    'status' => 'erro',
+                    'mensagem' => 'Já existe um usuário com esse e-mail.'
+                ];
+            }
+
+            // Senha criptografada (recomenda-se usar bcrypt ou algo similar)
+            $senhaHash = password_hash($senha, PASSWORD_DEFAULT);
+
+            // Insere o novo usuário na tabela
+            $stmt = $conn->prepare("
+                INSERT INTO clientes (nome, email, senha, estado, regime, tipo)
+                VALUES (:nome, :email, :senha, :estado, :regime, :tipo)
+            ");
+            $stmt->bindParam(':nome', $nome, PDO::PARAM_STR);
+            $stmt->bindParam(':email', $email, PDO::PARAM_STR);
+            $stmt->bindParam(':senha', $senhaHash, PDO::PARAM_STR);
+            $stmt->bindParam(':estado', $estado, PDO::PARAM_STR);
+            $stmt->bindParam(':regime', $regime_fiscal, PDO::PARAM_STR);
+            $stmt->bindParam(':tipo', $tipo, PDO::PARAM_STR);
+            $stmt->execute();
+
+            // Retorna o sucesso
+            return [
+                'status' => 'sucesso',
+                'mensagem' => 'Usuário cadastrado com sucesso.'
+            ];
+
+        } catch (PDOException $e) {
+            return [
+                'status' => 'erro',
+                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    return [
+        'status' => 'erro',
+        'mensagem' => 'Conexão ao banco não disponível.'
+    ];
 }
 
 ?>
