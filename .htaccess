@@ -1,7 +1,11 @@
 RewriteEngine On
 
+# Permitir acesso a arquivos com extensões específicas (.png, .jpg, .jpeg)
+RewriteCond %{REQUEST_URI} \.(png|jpg|jpeg)$ [NC]
+RewriteRule ^ - [L]
+
 # Certifica-se de que arquivos e diretórios reais NÃO sejam redirecionados
-RewriteCond %{REQUEST_FILENAME} -f
+RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d
 RewriteRule ^ - [L]
 

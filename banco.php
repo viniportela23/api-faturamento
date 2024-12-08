@@ -574,5 +574,323 @@ function cadastraUsuarios($nome, $email, $senha, $estado, $regime_fiscal, $tipo)
         'mensagem' => 'Conexão ao banco não disponível.'
     ];
 }
+function cadastraProduto($nome, $codigo, $cor, $quant_minima, $imagem, $real_rs, $presumido_rs, $simples_rs, $real_sc, $presumido_sc, $simples_sc, $real_pr, $presumido_pr, $simples_pr) {
+    global $conn; // Usa a conexão global
+
+    if ($conn) {
+        try {
+            // Insere o produto na tabela 'produtos'
+            $stmt = $conn->prepare("INSERT INTO produtos (nome, codigo, cor, quantidade_minima, imagem) VALUES (:nome, :codigo, :cor, :quant_minima, :imagem)");
+            $stmt->bindParam(':nome', $nome, PDO::PARAM_STR);
+            $stmt->bindParam(':codigo', $codigo, PDO::PARAM_STR);
+            $stmt->bindParam(':cor', $cor, PDO::PARAM_STR);
+            $stmt->bindParam(':quant_minima', $quant_minima, PDO::PARAM_INT);
+            $stmt->bindParam(':imagem', $imagem, PDO::PARAM_STR);
+            $stmt->execute();
+            $produtoId = $conn->lastInsertId(); // Pega o ID do produto inserido
+
+            // Inserir os preços por estado e regime na tabela 'precos'
+            $precos = [
+                'RS' => ['Lucro Real' => $real_rs, 'Lucro Presumido' => $presumido_rs, 'Simples Nacional' => $simples_rs],
+                'SC' => ['Lucro Real' => $real_sc, 'Lucro Presumido' => $presumido_sc, 'Simples Nacional' => $simples_sc],
+                'PR' => ['Lucro Real' => $real_pr, 'Lucro Presumido' => $presumido_pr, 'Simples Nacional' => $simples_pr],
+            ];
+
+            foreach ($precos as $estado => $regimes) {
+                foreach ($regimes as $regime => $preco) {
+                    $stmt = $conn->prepare("INSERT INTO precos (produto_id, estado, regime, preco) VALUES (:produto_id, :estado, :regime, :preco)");
+                    $stmt->bindParam(':produto_id', $produtoId, PDO::PARAM_INT);
+                    $stmt->bindParam(':estado', $estado, PDO::PARAM_STR);
+                    $stmt->bindParam(':regime', $regime, PDO::PARAM_STR);
+                    $stmt->bindParam(':preco', $preco, PDO::PARAM_STR);
+                    $stmt->execute();
+                }
+            }
+
+            // Retorna o sucesso
+            return [
+                'status' => 'sucesso',
+                'mensagem' => 'Produto cadastrado com sucesso.'
+            ];
+
+        } catch (PDOException $e) {
+            return [
+                'status' => 'erro',
+                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    return [
+        'status' => 'erro',
+        'mensagem' => 'Conexão ao banco não disponível.'
+    ];
+}
+function listaPedidosAdmin() {
+    global $conn; // Usa a conexão global
+
+    if ($conn) {
+        try {
+            // Consulta os pedidos do usuário no banco
+            $stmt = $conn->prepare("
+                SELECT 
+                    pe.id AS pedido_id, 
+                    c.nome AS cliente_nome, 
+                    c.email AS cliente_email,
+                    p.nome AS produto_nome, 
+                    p.codigo AS produto_codigo,
+                    pe.quantidade, 
+                    pe.data_pedido, 
+                    pe.status
+                FROM pedidos pe
+                INNER JOIN clientes c ON pe.cliente_id = c.id
+                INNER JOIN produtos p ON pe.produto_id = p.id
+                ORDER BY pe.data_pedido DESC
+            ");
+            $stmt->execute();
+
+            // Busca todos os registros
+            $listaPedidosA = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            if ($listaPedidosA) {
+                return [
+                    'status' => 'sucesso',
+                    'dados' => $listaPedidosA
+                ];
+            } else {
+                return [
+                    'status' => 'erro',
+                    'mensagem' => 'Nenhum pedido encontrado.'
+                ];
+            }
+        } catch (PDOException $e) {
+            return [
+                'status' => 'erro',
+                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    return [
+        'status' => 'erro',
+        'mensagem' => 'Conexão ao banco não disponível.'
+    ];
+}
+function desativaProduto($id_produto) {
+    global $conn; // Usa a conexão global
+
+    if ($conn) {
+        try {
+            $stmt = $conn->prepare("SELECT id FROM produtos WHERE id = :id_produto");
+            $stmt->bindParam(':id_produto', $id_produto, PDO::PARAM_STR); // Vincula o parâmetro nomeado
+            $stmt->execute();
+            $selectDestaivaProduto = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if ($selectDestaivaProduto) {
+
+                $stmtUpdate = $conn->prepare("
+                    UPDATE produtos SET ativo = 0 
+                    WHERE id = :produto_id
+                ");
+                $stmtUpdate->bindParam(':produto_id', $id_produto);
+                $stmtUpdate->execute();
+
+                // Busca todos os registros
+                $destaivaProduto = $stmtUpdate->fetchAll(PDO::FETCH_ASSOC);
+
+                return [
+                    'status' => 'sucesso',
+                    'mensagem' => 'Produto desativado com sucesso.'
+                ];
+            } else {
+                return [
+                    'status' => 'erro',
+                    'mensagem' => 'Este produto nao existe.'
+                ];
+            }
+        } catch (PDOException $e) {
+            return [
+                'status' => 'erro',
+                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+            ];
+        }
+    }
+    return [
+        'status' => 'erro',
+        'mensagem' => 'Conexão ao banco não disponível.'
+    ];
+}
+function alteraStatusPedido($pedido_id, $status) {
+    global $conn; // Usa a conexão global
+
+    if ($conn) {
+        try {
+            $stmt = $conn->prepare("SELECT id FROM pedidos WHERE id = :pedido_id");
+            $stmt->bindParam(':pedido_id', $pedido_id, PDO::PARAM_STR); // Vincula o parâmetro nomeado
+            $stmt->execute();
+            $selectDestaivaProduto = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if ($selectDestaivaProduto) {
+
+                $stmtUpdate = $conn->prepare("
+                    UPDATE pedidos SET status = :status
+                    WHERE id = :pedido_id
+                ");
+                $stmtUpdate->bindParam(':status', $status);
+                $stmtUpdate->bindParam(':pedido_id', $pedido_id);
+                $stmtUpdate->execute();
+
+                // Busca todos os registros
+                $destaivaProduto = $stmtUpdate->fetchAll(PDO::FETCH_ASSOC);
+
+                return [
+                    'status' => 'sucesso',
+                    'mensagem' => 'Pedido alterado com sucesso.'
+                ];
+            } else {
+                return [
+                    'status' => 'erro',
+                    'mensagem' => 'Este Pedido nao existe.'
+                ];
+            }
+        } catch (PDOException $e) {
+            return [
+                'status' => 'erro',
+                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+            ];
+        }
+    }
+    return [
+        'status' => 'erro',
+        'mensagem' => 'Conexão ao banco não disponível.'
+    ];
+}
+function puxaDadoProduto($produto_id) {
+    global $conn; // Usa a conexão global
+
+    if ($conn) {
+        try {
+            // Consulta os dados do produto
+            $stmt = $conn->prepare("SELECT * FROM produtos WHERE id = :produto_id");
+            $stmt->bindParam(':produto_id', $produto_id, PDO::PARAM_INT);
+            $stmt->execute();
+            $produto = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$produto) {
+                return [
+                    'status' => 'erro',
+                    'mensagem' => 'Produto não encontrado.'
+                ];
+            }
+
+            // Consulta os preços do produto
+            $stmt = $conn->prepare("SELECT estado, regime, preco FROM precos WHERE produto_id = :produto_id");
+            $stmt->bindParam(':produto_id', $produto_id, PDO::PARAM_INT);
+            $stmt->execute();
+            $precos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            // Estrutura os dados para retorno
+            $dadosProduto = [
+                'produto' => $produto,
+                'precos' => $precos
+            ];
+
+            return [
+                'status' => 'sucesso',
+                'dados' => $dadosProduto
+            ];
+
+        } catch (PDOException $e) {
+            return [
+                'status' => 'erro',
+                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    return [
+        'status' => 'erro',
+        'mensagem' => 'Conexão ao banco não disponível.'
+    ];
+}
+
+function atualizarProduto($nome, $codigo, $cor, $quant_minima, $imagem, $real_rs, $presumido_rs, $simples_rs, $real_sc, $presumido_sc, $simples_sc, $real_pr, $presumido_pr, $simples_pr, $produto_id) {
+    global $conn; // Usa a conexão global
+
+    if ($conn) {
+        try {
+            // Inicia a consulta base
+            $sql = "UPDATE produtos 
+                    SET nome = :nome, codigo = :codigo, cor = :cor, quantidade_minima = :quant_minima";
+            
+            // Adiciona o campo `imagem` à consulta apenas se ela não for nula
+            if ($imagem !== null) {
+                $sql .= ", imagem = :imagem";
+            }
+
+            // Finaliza a consulta com a cláusula WHERE
+            $sql .= " WHERE id = :produto_id";
+
+            // Prepara a consulta
+            $stmt = $conn->prepare($sql);
+
+            // Vincula os parâmetros comuns
+            $stmt->bindParam(':nome', $nome, PDO::PARAM_STR);
+            $stmt->bindParam(':codigo', $codigo, PDO::PARAM_STR);
+            $stmt->bindParam(':cor', $cor, PDO::PARAM_STR);
+            $stmt->bindParam(':quant_minima', $quant_minima, PDO::PARAM_INT);
+            $stmt->bindParam(':produto_id', $produto_id, PDO::PARAM_INT);
+
+            // Vincula o parâmetro `imagem` apenas se ele não for nulo
+            if ($imagem !== null) {
+                $stmt->bindParam(':imagem', $imagem, PDO::PARAM_STR);
+            }
+
+            // Executa a consulta de atualização
+            $stmt->execute();
+
+            // Remove os preços existentes relacionados ao produto
+            $stmt = $conn->prepare("DELETE FROM precos WHERE produto_id = :produto_id");
+            $stmt->bindParam(':produto_id', $produto_id, PDO::PARAM_INT);
+            $stmt->execute();
+
+            // Insere os novos preços por estado e regime na tabela 'precos'
+            $precos = [
+                'RS' => ['Lucro Real' => $real_rs, 'Lucro Presumido' => $presumido_rs, 'Simples Nacional' => $simples_rs],
+                'SC' => ['Lucro Real' => $real_sc, 'Lucro Presumido' => $presumido_sc, 'Simples Nacional' => $simples_sc],
+                'PR' => ['Lucro Real' => $real_pr, 'Lucro Presumido' => $presumido_pr, 'Simples Nacional' => $simples_pr],
+            ];
+
+            foreach ($precos as $estado => $regimes) {
+                foreach ($regimes as $regime => $preco) {
+                    $stmt = $conn->prepare("INSERT INTO precos (produto_id, estado, regime, preco) VALUES (:produto_id, :estado, :regime, :preco)");
+                    $stmt->bindParam(':produto_id', $produto_id, PDO::PARAM_INT);
+                    $stmt->bindParam(':estado', $estado, PDO::PARAM_STR);
+                    $stmt->bindParam(':regime', $regime, PDO::PARAM_STR);
+                    $stmt->bindParam(':preco', $preco, PDO::PARAM_STR);
+                    $stmt->execute();
+                }
+            }
+
+            // Retorna sucesso
+            return [
+                'status' => 'sucesso',
+                'mensagem' => 'Produto atualizado com sucesso.'
+            ];
+
+        } catch (PDOException $e) {
+            return [
+                'status' => 'erro',
+                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    return [
+        'status' => 'erro',
+        'mensagem' => 'Conexão ao banco não disponível.'
+    ];
+}
+
 
 ?>
