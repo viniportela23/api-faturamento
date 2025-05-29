@@ -163,9 +163,9 @@ function consultaProdutos($busca, $estado, $regime, $nivel) {
                 }
             } else { // Admin
                 $query = "
-                    SELECT p.id, p.nome, p.codigo, p.cor, p.imagem, p.quantidade_minima
+                    SELECT p.id, p.nome, p.codigo, p.cor, p.imagem, p.quantidade_minima, p.ativo
                     FROM produtos p
-                    WHERE ($condicoesBusca) AND p.ativo = 1
+                    WHERE ($condicoesBusca)
                 ";
                 $stmt = $conn->prepare($query);
 
@@ -776,15 +776,22 @@ function desativaProduto($id_produto) {
 
     if ($conn) {
         try {
-            $stmt = $conn->prepare("SELECT id FROM produtos WHERE id = :id_produto");
+            $stmt = $conn->prepare("SELECT id, ativo FROM produtos WHERE id = :id_produto");
             $stmt->bindParam(':id_produto', $id_produto, PDO::PARAM_STR); // Vincula o parâmetro nomeado
             $stmt->execute();
             $selectDestaivaProduto = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if ($selectDestaivaProduto) {
 
+                if ($selectDestaivaProduto['ativo'] === 0) {
+                    $statusReal = 1;
+                    $resposta = 'Produto ativado com sucesso.';
+                } else {
+                    $statusReal = 0;
+                    $resposta = 'Produto desativado com sucesso.';
+                }
                 $stmtUpdate = $conn->prepare("
-                    UPDATE produtos SET ativo = 0 
+                    UPDATE produtos SET ativo = $statusReal
                     WHERE id = :produto_id
                 ");
                 $stmtUpdate->bindParam(':produto_id', $id_produto);
@@ -795,7 +802,7 @@ function desativaProduto($id_produto) {
 
                 return [
                     'status' => 'sucesso',
-                    'mensagem' => 'Produto desativado com sucesso.'
+                    'mensagem' => $resposta
                 ];
             } else {
                 return [

@@ -8,10 +8,27 @@ error_reporting(E_ALL);
 /*
 */
 
-// Se o IP estiver permitido, continua com a configuração de CORS
-header("Access-Control-Allow-Origin: *"); // Permitir apenas o IP do cliente
-header("Access-Control-Allow-Methods: POST, GET, OPTIONS, FILES");
-header("Access-Control-Allow-Headers: Content-Type");
+$allowedOrigin = "https://jblteste.com.br";
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+$type = $_GET['tipo'] ?? ''; // Obtém o tipo da requisição
+
+if (in_array($type, ['webhook']) && (!isset($_POST['tipo']) || $_POST['tipo'] === null)) {
+    // Permite requisições de qualquer origem quando for do tipo webhook
+    header("Access-Control-Allow-Origin: *");
+    header("Access-Control-Allow-Methods: POST, GET, OPTIONS");
+    header("Access-Control-Allow-Headers: Content-Type, Authorization");
+} else {// colocar 3 = quando tiver em produção
+    if ($origin = $allowedOrigin) {
+        header("Access-Control-Allow-Origin: $allowedOrigin");
+        header("Access-Control-Allow-Methods: POST, GET, OPTIONS");
+        header("Access-Control-Allow-Headers: Content-Type, Authorization");
+    } else {
+        // Bloqueia requisições de origens não permitidas
+        http_response_code(403); // Alterado para 403 (acesso proibido) em vez de 404 (não encontrado)
+        logResponse(); // Registra o log antes de sair
+        exit;
+    }
+}
 
 
 session_start();
@@ -68,22 +85,23 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tipo']) && $_POST['tip
 
             $respostaBanco = consultaPedidos($token['userId']);
 
-            if ($respostaBanco['status'] === 'sucesso') {
-                http_response_code(200);
-                // Envia a resPOSTa final para controle_login com o token
-                echo json_encode([
-                    'status' => 'sucesso', 
-                    'dados' => $respostaBanco['dados'],
-                    'nome' => $token['nome'],                   
-                    'token' => $token['token']]);
-            } elseif ($respostaBanco['status'] === 'nemnhum') {
-                http_response_code(200);
-
-                echo json_encode([
-                    'status' => 'sucesso', 
-                    'dados' => $respostaBanco['mensagem'],
-                    'nome' => $token['nome'],                   
-                    'token' => $token['token']]);
+            if ($respostaBanco['status'] === 'sucesso' || $respostaBanco['status'] === 'nenhum') {
+                if ($respostaBanco['status'] === 'sucesso') {
+                    http_response_code(200);
+                    // Envia a resPOSTa final para controle_login com o token
+                    echo json_encode([
+                        'status' => 'sucesso', 
+                        'dados' => $respostaBanco['dados'],
+                        'nome' => $token['nome'],                   
+                        'token' => $token['token']]);
+                } else {
+                    http_response_code(200);
+                    echo json_encode([
+                        'status' => 'sucesso', 
+                        'dados' => $respostaBanco['mensagem'],
+                        'nome' => $token['nome'],                   
+                        'token' => $token['token']]);
+                }
             } else {
                 http_response_code(500);
                 // Erro na validação de usuário
@@ -694,10 +712,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tipo']) && $_POST['tip
         echo json_encode(['status' => 'erro', 'mensagem' => 'Dados incompletos.']);
     }
 } else {
-    //http_response_code(404);
+    http_response_code(404);
+    /*
     echo json_encode([
         'status' => 'erro',
         'mensagem' => 'requisicao invalida.'
     ]);
+    */
 }
 ?>
