@@ -37,13 +37,13 @@ function verificaUsuario($email, $senha) {
             } else {
                 return [
                     'status' => 'erro',
-                    'mensagem' => 'Usuario nao encontrado. ' . $senha
+                    'mensagem' => 'Usuario nao encontrado. '
                 ];
             }
         } catch (PDOException $e) {
             return [
                 'status' => 'erro',
-                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+                'mensagem' => 'Erro no banco.'
             ];
         }
     }
@@ -120,7 +120,7 @@ function consultaPedidos($userId) {
         } catch (PDOException $e) {
             return [
                 'status' => 'erro',
-                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+                'mensagem' => 'Erro no banco.'
             ];
         }
     }
@@ -194,7 +194,7 @@ function consultaProdutos($busca, $estado, $regime, $nivel) {
         } catch (PDOException $e) {
             return [
                 'status' => 'erro',
-                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+                'mensagem' => 'Erro no banco.'
             ];
         }
     }
@@ -274,7 +274,7 @@ function listarCarrinho($userId) {
         } catch (PDOException $e) {
             return [
                 'status' => 'erro',
-                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+                'mensagem' => 'Erro no banco.'
             ];
         }
     }
@@ -436,7 +436,7 @@ function alteraQuantidadeProd($userId, $id_produto, $sinal, $estado, $regime) {
         } catch (PDOException $e) {
             return [
                 'status' => 'erro',
-                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+                'mensagem' => 'Erro no banco.'
             ];
         }
     }
@@ -447,23 +447,20 @@ function alteraQuantidadeProd($userId, $id_produto, $sinal, $estado, $regime) {
     ];
 }
 function carregaInfoDashAdmin() {
-    global $conn; // Usa a conexão global
+    global $conn;
 
     if (!$conn) {
-        return [
-            'status' => 'erro',
-            'mensagem' => 'Conexão ao banco não disponível.'
-        ];
+        return ['status' => 'erro', 'mensagem' => 'Conexão ao banco não disponível.'];
     }
 
     try {
         // Mês e ano atuais
         $mesAtual = date('Y-m');
         $anoAtual = date('Y');
-        $diasDoMes = range(1, date('t')); // Dias do mês atual
+        $diasDoMes = range(1, date('t'));
         $estados = ['RS', 'SC', 'PR'];
 
-        // Total de vendas acumuladas por estado ao longo do mês
+        // Vendas por estado
         $vendasPorEstado = [];
         foreach ($estados as $estado) {
             $dados = [];
@@ -485,41 +482,45 @@ function carregaInfoDashAdmin() {
         }
 
         // Indicadores gerais
-        $stmtClientes = $conn->query("
-            SELECT COUNT(*) AS total 
-            FROM clientes 
-            WHERE tipo = 'cliente'
-        ");
+        $stmtClientes = $conn->query("SELECT COUNT(*) AS total FROM clientes WHERE tipo = 'cliente'");
         $totalClientes = $stmtClientes->fetchColumn();
 
-        $stmtPedidosMes = $conn->prepare("
-            SELECT COUNT(*) AS total 
-            FROM pedidos 
-            WHERE DATE_FORMAT(data_pedido, '%Y-%m') = :mesAtual
-        ");
+        // Total de pedidos no mês (quantidade)
+        $stmtPedidosMes = $conn->prepare("SELECT COUNT(*) AS total FROM pedidos WHERE DATE_FORMAT(data_pedido, '%Y-%m') = :mesAtual");
         $stmtPedidosMes->bindParam(':mesAtual', $mesAtual);
         $stmtPedidosMes->execute();
-        $totalPedidosMes = $stmtPedidosMes->fetchColumn();
+        $totalPedidosMes = (int)$stmtPedidosMes->fetchColumn();
 
-        $stmtPedidosAno = $conn->prepare("
-            SELECT COUNT(*) AS total 
-            FROM pedidos 
-            WHERE DATE_FORMAT(data_pedido, '%Y') = :anoAtual
-        ");
+        // Valor total das vendas no mês atual
+        $stmtVendasMesAtual = $conn->prepare("SELECT SUM(valor_total) AS total FROM pedidos WHERE DATE_FORMAT(data_pedido, '%Y-%m') = :mesAtual");
+        $stmtVendasMesAtual->bindParam(':mesAtual', $mesAtual);
+        $stmtVendasMesAtual->execute();
+        $vendasMesAtual = (float)$stmtVendasMesAtual->fetchColumn() ?: 0;
+
+        // Média de valor por pedido no mês atual
+        $mediaPorPedido = ($totalPedidosMes > 0) ? $vendasMesAtual / $totalPedidosMes : 0;
+
+        // Mês anterior
+        $mesAnterior = date('Y-m', strtotime($mesAtual . ' -1 month'));
+        
+        // Valor total das vendas no mês anterior
+        $stmtVendasMesAnterior = $conn->prepare("SELECT SUM(valor_total) AS total FROM pedidos WHERE DATE_FORMAT(data_pedido, '%Y-%m') = :mesAnterior");
+        $stmtVendasMesAnterior->bindParam(':mesAnterior', $mesAnterior);
+        $stmtVendasMesAnterior->execute();
+        $vendasMesAnterior = (float)$stmtVendasMesAnterior->fetchColumn() ?: 0;
+
+        // Variação percentual das vendas
+        $variacaoPercentual = ($vendasMesAnterior > 0) ? (($vendasMesAtual - $vendasMesAnterior) / $vendasMesAnterior) * 100 : 0;
+        $variacaoFormatada = ($variacaoPercentual >= 0 ? '+' : '') . round($variacaoPercentual) . '%';
+
+        // Total de pedidos no ano
+        $stmtPedidosAno = $conn->prepare("SELECT COUNT(*) AS total FROM pedidos WHERE DATE_FORMAT(data_pedido, '%Y') = :anoAtual");
         $stmtPedidosAno->bindParam(':anoAtual', $anoAtual);
         $stmtPedidosAno->execute();
         $totalPedidosAno = $stmtPedidosAno->fetchColumn();
 
-        $stmtVendasTotaisMes = $conn->prepare("
-            SELECT SUM(i.quantidade * p.preco) AS total 
-            FROM pedidos ped
-            INNER JOIN itens_pedido i ON ped.id = i.pedido_id
-            INNER JOIN precos p ON i.produto_id = p.produto_id
-            WHERE DATE_FORMAT(ped.data_pedido, '%Y-%m') = :mesAtual
-        ");
-        $stmtVendasTotaisMes->bindParam(':mesAtual', $mesAtual);
-        $stmtVendasTotaisMes->execute();
-        $vendasTotaisMes = $stmtVendasTotaisMes->fetchColumn() ?: 0;
+        // Vendas totais do mês (alternativa)
+        $vendasTotaisMes = $vendasMesAtual;
 
         // Consolidando os dados para o dashboard
         $dadosDash = [
@@ -527,20 +528,19 @@ function carregaInfoDashAdmin() {
             'indicadores' => [
                 'total_clientes' => $totalClientes,
                 'total_pedidos_mes' => $totalPedidosMes,
+                'vendas_mes_atual' => number_format($vendasMesAtual, 2, ',', '.'),
+                'media_por_pedido' => number_format($mediaPorPedido, 2, ',', '.'),
+                'vendas_mes_anterior' => number_format($vendasMesAnterior, 2, ',', '.'),
+                'variacao_vendas' => $variacaoFormatada,
                 'total_pedidos_ano' => $totalPedidosAno,
-                'vendas_totais_mes' => $vendasTotaisMes
+                'vendas_totais_mes' => number_format($vendasTotaisMes, 2, ',', '.')
             ]
         ];
 
-        return [
-            'status' => 'sucesso',
-            'dados' => $dadosDash
-        ];
+        return ['status' => 'sucesso', 'dados' => $dadosDash];
+
     } catch (PDOException $e) {
-        return [
-            'status' => 'erro',
-            'mensagem' => 'Erro no banco: ' . $e->getMessage()
-        ];
+        return ['status' => 'erro', 'mensagem' => 'Erro no banco: ' . $e->getMessage()];
     }
 }
 function listaUsuarios() {
@@ -577,7 +577,7 @@ function listaUsuarios() {
         } catch (PDOException $e) {
             return [
                 'status' => 'erro',
-                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+                'mensagem' => 'Erro no banco.'
             ];
         }
     }
@@ -631,7 +631,7 @@ function cadastraUsuarios($nome, $email, $senha, $estado, $regime_fiscal, $tipo)
         } catch (PDOException $e) {
             return [
                 'status' => 'erro',
-                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+                'mensagem' => 'Erro no banco.'
             ];
         }
     }
@@ -683,7 +683,7 @@ function cadastraProduto($nome, $codigo, $cor, $quant_minima, $imagem, $real_rs,
         } catch (PDOException $e) {
             return [
                 'status' => 'erro',
-                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+                'mensagem' => 'Erro no banco.'
             ];
         }
     }
@@ -761,7 +761,7 @@ function listaPedidosAdmin() {
         } catch (PDOException $e) {
             return [
                 'status' => 'erro',
-                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+                'mensagem' => 'Erro no banco.'
             ];
         }
     }
@@ -782,6 +782,8 @@ function desativaProduto($id_produto) {
             $selectDestaivaProduto = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if ($selectDestaivaProduto) {
+
+                $selectDestaivaProduto['ativo'] = (int)$selectDestaivaProduto['ativo'];
 
                 if ($selectDestaivaProduto['ativo'] === 0) {
                     $statusReal = 1;
@@ -813,7 +815,7 @@ function desativaProduto($id_produto) {
         } catch (PDOException $e) {
             return [
                 'status' => 'erro',
-                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+                'mensagem' => 'Erro no banco.'
             ];
         }
     }
@@ -858,7 +860,7 @@ function alteraStatusPedido($pedido_id, $status) {
         } catch (PDOException $e) {
             return [
                 'status' => 'erro',
-                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+                'mensagem' => 'Erro no banco.'
             ];
         }
     }
@@ -905,7 +907,7 @@ function puxaDadoProduto($produto_id) {
         } catch (PDOException $e) {
             return [
                 'status' => 'erro',
-                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+                'mensagem' => 'Erro no banco.'
             ];
         }
     }
@@ -983,7 +985,7 @@ function atualizarProduto($nome, $codigo, $cor, $quant_minima, $imagem, $real_rs
         } catch (PDOException $e) {
             return [
                 'status' => 'erro',
-                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+                'mensagem' => 'Erro no banco.'
             ];
         }
     }
@@ -1068,7 +1070,97 @@ function criarPedido($userId) {
         } catch (PDOException $e) {
             return [
                 'status' => 'erro',
-                'mensagem' => 'Erro no banco: ' . $e->getMessage()
+                'mensagem' => 'Erro no banco.'
+            ];
+        }
+    }
+
+    return [
+        'status' => 'erro',
+        'mensagem' => 'Conexão ao banco não disponível.'
+    ];
+}
+function editaUsuario($id, $nome, $email, $estado, $regime) {
+    global $conn; // Usa a conexão global
+
+    if ($conn) {
+        try {
+            $stmt = $conn->prepare("SELECT * FROM clientes WHERE id = :id");
+            $stmt->bindParam(':id', $id, PDO::PARAM_INT);
+            $stmt->execute();
+            $verificaUsuario = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$verificaUsuario) {
+                return [
+                    'status' => 'erro',
+                    'mensagem' => 'Nenhum usuário encontrado.'
+                ];
+            }
+
+            $stmt = $conn->prepare("UPDATE clientes SET nome = :nome, email = :email, estado = :estado, regime = :regime WHERE id = :id");
+            $stmt->bindParam(':id', $id, PDO::PARAM_INT);
+            $stmt->bindParam(':nome', $nome, PDO::PARAM_STR);
+            $stmt->bindParam(':email', $email, PDO::PARAM_STR);
+            $stmt->bindParam(':estado', $estado, PDO::PARAM_STR);
+            $stmt->bindParam(':regime', $regime, PDO::PARAM_STR);
+            $stmt->execute();
+
+            return [
+                'status' => 'sucesso',
+                'mensagem' => 'Usuário atualizado com sucesso.'
+            ];
+        } catch (PDOException $e) {
+            return [
+                'status' => 'erro',
+                'mensagem' => 'Erro no banco ao alterar usuário.'
+            ];
+        }
+    }
+
+    return [
+        'status' => 'erro',
+        'mensagem' => 'Conexão ao banco não disponível.'
+    ];
+}
+function alteraSenhaUser($id, $nova_senha) {
+    global $conn; // Usa a conexão global
+    
+    if (strlen($nova_senha) <= 8) {
+        return [
+            'status' => 'erro',
+            'mensagem' => 'A senha deve conter mais de 8 caracteres.'
+        ];
+    }
+
+    if ($conn) {
+        try {
+            $stmt = $conn->prepare("SELECT * FROM clientes WHERE id = :id");
+            $stmt->bindParam(':id', $id, PDO::PARAM_INT);
+            $stmt->execute();
+            $verificaUsuario = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$verificaUsuario) {
+                return [
+                    'status' => 'erro',
+                    'mensagem' => 'Nenhum usuário encontrado.'
+                ];
+            }
+
+            $senhaHash = password_hash($nova_senha, PASSWORD_DEFAULT);
+
+            $stmt = $conn->prepare("UPDATE clientes SET senha = :nova_senha_cripto WHERE id = :id");
+            $stmt->bindParam(':id', $id, PDO::PARAM_INT);
+            $stmt->bindParam(':nova_senha_cripto', $senhaHash, PDO::PARAM_STR);
+            $stmt->execute();
+
+            return [
+                'status' => 'sucesso',
+                'mensagem' => 'Usuário atualizado com sucesso.'
+            ];
+        } catch (PDOException $e) {
+            return [
+                'status' => 'erro',
+                'mensagem' => 'Erro no banco ao alterar usuário.'
             ];
         }
     }

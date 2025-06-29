@@ -106,4 +106,47 @@ function verificaToken($token) {
         ];
     }
 }
+function enviarMensagemWablas($token, $phoneNumber, $message, $deviceType = 'default') {
+    // URL da API do Wablas
+    $url = 'https://api.wablas.com/api/send-message';
+    
+    // Preparar os dados da requisição
+    $data = [
+        'phone' => $phoneNumber,
+        'message' => $message,
+        'token' => $token,
+        'device_type' => $deviceType
+    ];
+    
+    // Inicializar cURL
+    $ch = curl_init();
+    
+    // Configurar as opções do cURL
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($data));
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Content-Type: application/x-www-form-urlencoded'
+    ]);
+    
+    // Executar a requisição e obter a resposta
+    $response = curl_exec($ch);
+    
+    // Verificar por erros
+    if (curl_errno($ch)) {
+        $error_msg = curl_error($ch);
+        curl_close($ch);
+        return ['success' => false, 'error' => $error_msg];
+    }
+    
+    // Fechar a conexão cURL
+    curl_close($ch);
+    
+    // Decodificar a resposta JSON
+    $responseData = json_decode($response, true);
+    
+    return $responseData;
+}
+
 ?>

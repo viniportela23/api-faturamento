@@ -1,0 +1,5 @@
+RewriteEngine On
+
+# Certifica-se de que mod_rewrite está ativo e que a URL da imagem com a query 'redimensiona' seja capturada corretamente
+RewriteCond %{QUERY_STRING} ^redimensiona=([0-9]+)$
+RewriteRule ^(.+)$ /uploads/redimensiona.php?arquivo=$1&tamanho=%1 [L]

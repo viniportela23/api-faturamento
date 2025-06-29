@@ -1,14 +1,66 @@
 <?php
 // main.php
+date_default_timezone_set('America/Sao_Paulo'); // Define o fuso horário para São Paulo
+
+// Função para registrar as requisições e respostas
+function logRequestAndResponse($logFile = 'logs/requisicoes.log') {
+    // Cria o diretório de logs, se não existir
+    if (!file_exists(dirname($logFile))) {
+        mkdir(dirname($logFile), 0777, true);
+    }
+
+    // Captura as informações da requisição
+    $logData = [
+        'Data/Hora' => date('Y-m-d H:i:s'),
+        'Método' => $_SERVER['REQUEST_METHOD'],
+        'URL' => $_SERVER['REQUEST_URI'],
+        'Headers' => getallheaders(),
+        'GET' => $_GET,
+        'POST' => $_POST,
+        'FILES' => $_FILES,
+        'RAW_BODY' => file_get_contents('php://input'),
+        'IP' => $_SERVER['REMOTE_ADDR'],
+    ];
+
+    // Formata os dados da requisição como JSON
+    $logJson = json_encode(['Requisicao' => $logData], JSON_PRETTY_PRINT);
+
+    // Salva os dados da requisição no log
+    file_put_contents($logFile, $logJson . PHP_EOL, FILE_APPEND);
+}
+
+// Função para registrar a resposta
+function logResponse($logFile = 'logs/requisicoes.log') {
+    // Captura o conteúdo da saída (resposta do script)
+    $responseContent = ob_get_contents();
+
+    // Salva a resposta no log
+    $logData = [
+        'Resposta' => $responseContent,
+    ];
+
+    $logJson = json_encode($logData, JSON_PRETTY_PRINT);
+
+    // Adiciona ao arquivo de log
+    file_put_contents($logFile, $logJson . PHP_EOL . str_repeat('=', 80) . PHP_EOL, FILE_APPEND);
+}
+
+// Ativa o buffer de saída para capturar a resposta do script
+ob_start();
+
+// Registra a requisição
+logRequestAndResponse();
+/*
+
+/*
 
 //remover quando tiver em producao
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
-/*
 */
 
-$allowedOrigin = "https://jblteste.com.br";
+$allowedOrigin = "https://centraljbl.com.br";
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 $type = $_GET['tipo'] ?? ''; // Obtém o tipo da requisição
 
@@ -17,7 +69,7 @@ if (in_array($type, ['webhook']) && (!isset($_POST['tipo']) || $_POST['tipo'] ==
     header("Access-Control-Allow-Origin: *");
     header("Access-Control-Allow-Methods: POST, GET, OPTIONS");
     header("Access-Control-Allow-Headers: Content-Type, Authorization");
-} else {// colocar 3 = quando tiver em produção
+} else {// colocar === quando tiver em produção
     if ($origin = $allowedOrigin) {
         header("Access-Control-Allow-Origin: $allowedOrigin");
         header("Access-Control-Allow-Methods: POST, GET, OPTIONS");
@@ -711,6 +763,101 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tipo']) && $_POST['tip
         http_response_code(422);
         echo json_encode(['status' => 'erro', 'mensagem' => 'Dados incompletos.']);
     }
+} elseif ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tipo']) && $_POST['tipo'] == 'atualizar-cliente') {
+    $id = $_POST['id'] ?? null;
+    $nome = $_POST['nome'] ?? null;
+    $email = $_POST['email'] ?? null;
+    $estado = $_POST['estado'] ?? null;
+    $regime = $_POST['regime'] ?? null;
+    $token = $_POST['token'] ?? null;
+
+    if ($token) {
+        require_once 'token.php';
+
+        $token = verificaToken($token);
+
+        if ($token['status'] === 'sucesso' && $token['nivel'] === 'admin') {
+            require_once 'banco.php';
+
+            $respostaBanco = editaUsuario($id, $nome, $email, $estado, $regime);
+
+            if ($respostaBanco['status'] === 'sucesso') {
+
+                http_response_code(200);
+
+                echo json_encode([
+                    'status' => 'sucesso',
+                    'mensagem' => $respostaBanco['mensagem'],
+                    'token' => $token['token']]);
+            } else {
+                http_response_code(500);
+                // Erro na validação de usuário
+                echo json_encode(['status' => 'erro', 'mensagem' => $respostaBanco['mensagem']]);
+
+            }
+        } else {
+            http_response_code(422);
+            // Erro na validação de usuário
+            echo json_encode(['status' => 'erro', 'mensagem' => $token['mensagem'] ?? 'Erro ao gerrar token do usuario.']);
+        }
+    } else {
+        http_response_code(422);
+        echo json_encode(['status' => 'erro', 'mensagem' => 'Dados incompletos.']);
+    }
+} elseif ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tipo']) && $_POST['tipo'] == 'alterar-senha-cliente') {
+    $id = $_POST['id'] ?? null;
+    $nova_senha = $_POST['nova_senha'] ?? null;
+    $token = $_POST['token'] ?? null;
+
+    if ($token) {
+        require_once 'token.php';
+
+        $token = verificaToken($token);
+
+        if ($token['status'] === 'sucesso' && $token['nivel'] === 'admin') {
+            require_once 'banco.php';
+
+            $respostaBanco = alteraSenhaUser($id, $nova_senha);
+
+            if ($respostaBanco['status'] === 'sucesso') {
+
+                http_response_code(200);
+
+                echo json_encode([
+                    'status' => 'sucesso',
+                    'mensagem' => $respostaBanco['mensagem'],
+                    'token' => $token['token']]);
+            } else {
+                http_response_code(500);
+                // Erro na validação de usuário
+                echo json_encode(['status' => 'erro', 'mensagem' => $respostaBanco['mensagem']]);
+
+            }
+        } else {
+            http_response_code(422);
+            // Erro na validação de usuário
+            echo json_encode(['status' => 'erro', 'mensagem' => $token['mensagem'] ?? 'Erro ao gerrar token do usuario.']);
+        }
+    } else {
+        http_response_code(422);
+        echo json_encode(['status' => 'erro', 'mensagem' => 'Dados incompletos.']);
+    }
+} elseif ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tipo']) && $_POST['tipo'] == 'teste-23') {
+
+    $token = 'SEU_TOKEN_AQUI'; // Substitua pelo seu token do Wablas
+    $numero = '555596412667'; // Número com código do país e DDD
+    $mensagem = 'Olá, esta é uma mensagem de teste enviada via API Wablas!';
+
+    require_once 'token.php';
+
+    $token = enviarMensagemWablas($token);
+
+    if ($token['status'] === 'sucesso') {
+    } else {
+        http_response_code(422);
+        echo json_encode(['status' => 'erro', 'mensagem' => $token ?? 'Erro ao enviar mensagem.']);
+    }
+
 } else {
     http_response_code(404);
     /*
@@ -720,4 +867,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tipo']) && $_POST['tip
     ]);
     */
 }
+// No final do script, registra a resposta no log
+logResponse();
+
+// Envia a resposta ao cliente
+ob_end_flush();
+
 ?>
