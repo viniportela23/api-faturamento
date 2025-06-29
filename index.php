@@ -50,7 +50,6 @@ ob_start();
 
 // Registra a requisição
 logRequestAndResponse();
-/*
 
 /*
 
@@ -58,6 +57,8 @@ logRequestAndResponse();
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
+
+
 */
 
 $allowedOrigin = "https://centraljbl.com.br";
@@ -729,6 +730,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tipo']) && $_POST['tip
 } elseif ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tipo']) && $_POST['tipo'] == 'finalizar-pedido') {
     $token = $_POST['token'] ?? null;
 
+    $tokenWablas = '11MRLonB98auTpGI3xEMqcq1GoadpIMPQ8WUjsB4TCqquzPnJc70fMh'; // Substitua pelo seu token do Wablas
+    $secret_key = 'i6OJgyEk';
+    $url = "https://solo.wablas.com/api/send-message";
+
     if ($token) {
         // Inclui o arquivo de consulta ao banco somente quando necessário
         require_once 'token.php';
@@ -742,20 +747,29 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tipo']) && $_POST['tip
 
             if ($respostaBanco['status'] === 'sucesso') {
 
-                http_response_code(200);
+                $respostaWablas = enviar_mensagem($respostaBanco['numero'], $tokenWablas, $secret_key, $respostaBanco['produtos'], $respostaBanco['valor_total'], $respostaBanco['pedido_id'], $url, $respostaBanco['nome_cliente'], $token['userId']);
 
-                echo json_encode([
-                    'status' => 'sucesso',
-                    'mensagem' => $respostaBanco['mensagem'],
-                    'token' => $token['token']]);
+                if ($respostaWablas['status'] === 'sucesso') {
+
+                    http_response_code(200);
+                    echo json_encode([
+                        'status' => 'sucesso',
+                        'mensagem' => $respostaBanco['mensagem'],
+                        'token' => $token['token']]);
+                } else {
+                    http_response_code(422);
+                    // Erro na validação de usuário
+                    echo json_encode(['status' => 'erro', 'mensagem' => $respostaWablas['mensagem']]);
+
+                }
             } else {
-                http_response_code(500);
+                http_response_code(422);
                 // Erro na validação de usuário
                 echo json_encode(['status' => 'erro', 'mensagem' => $respostaBanco['mensagem']]);
 
             }
         } else {
-            http_response_code(422);
+            http_response_code(402);
             // Erro na validação de usuário
             echo json_encode(['status' => 'erro', 'mensagem' => $token['mensagem'] ?? 'Erro ao gerrar token do usuario.']);
         }
@@ -842,22 +856,44 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tipo']) && $_POST['tip
         http_response_code(422);
         echo json_encode(['status' => 'erro', 'mensagem' => 'Dados incompletos.']);
     }
-} elseif ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tipo']) && $_POST['tipo'] == 'teste-23') {
+} elseif ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tipo']) && $_POST['tipo'] == 'altera-numero-bot') {
+    $id = $_POST['id'] ?? null;
+    $numero = $_POST['numero'] ?? null;
+    $token = $_POST['token'] ?? null;
 
-    $token = 'SEU_TOKEN_AQUI'; // Substitua pelo seu token do Wablas
-    $numero = '555596412667'; // Número com código do país e DDD
-    $mensagem = 'Olá, esta é uma mensagem de teste enviada via API Wablas!';
+    if ($token) {
+        require_once 'token.php';
 
-    require_once 'token.php';
+        $token = verificaToken($token);
 
-    $token = enviarMensagemWablas($token);
+        if ($token['status'] === 'sucesso' && $token['nivel'] === 'admin') {
+            require_once 'banco.php';
 
-    if ($token['status'] === 'sucesso') {
+            $respostaBanco = alteraNumeroBot($id, $numero);
+
+            if ($respostaBanco['status'] === 'sucesso') {
+
+                http_response_code(200);
+
+                echo json_encode([
+                    'status' => 'sucesso',
+                    'mensagem' => $respostaBanco['mensagem'],
+                    'token' => $token['token']]);
+            } else {
+                http_response_code(500);
+                // Erro na validação de usuário
+                echo json_encode(['status' => 'erro', 'mensagem' => $respostaBanco['mensagem']]);
+
+            }
+        } else {
+            http_response_code(422);
+            // Erro na validação de usuário
+            echo json_encode(['status' => 'erro', 'mensagem' => $token['mensagem'] ?? 'Erro ao gerrar token do usuario.']);
+        }
     } else {
         http_response_code(422);
-        echo json_encode(['status' => 'erro', 'mensagem' => $token ?? 'Erro ao enviar mensagem.']);
+        echo json_encode(['status' => 'erro', 'mensagem' => 'Dados incompletos.']);
     }
-
 } else {
     http_response_code(404);
     /*

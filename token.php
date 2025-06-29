@@ -149,4 +149,98 @@ function enviarMensagemWablas($token, $phoneNumber, $message, $deviceType = 'def
     return $responseData;
 }
 
+function formatar_telefone($telefone_br) {
+    $telefone_digits = preg_replace('/\D/', '', $telefone_br);
+    if (strpos($telefone_digits, '0') === 0) {
+        $telefone_digits = substr($telefone_digits, 1);
+    }
+    if (strlen($telefone_digits) == 11) {
+        return "55" . $telefone_digits;
+    }
+    return $telefone_digits;
+}
+
+function enviar_mensagem($numero, $token, $secret_key, $produtos, $valor_total, $pedido_id, $url, $nome_user, $userId) {
+    // Chama a função formata_texto() primeiro
+    $mensagem = formata_texto($produtos, $valor_total, $pedido_id, $nome_user, $userId);
+    
+    // Verifica se a mensagem foi formatada corretamente
+    if (empty($mensagem)) {
+        return [
+            'status' => 'erro',
+            'mensagem' => 'Mensagem não formatada.'
+        ];
+    }
+
+    if (empty($numero) || empty($token) || empty($url)) {
+        error_log("Parâmetros inválidos para enviar_mensagem");
+        return false;
+    }
+
+    // Codifica a mensagem para URL
+    $mensagemCodificada = urlencode(trim($mensagem));
+    
+    // Monta a URL com os parâmetros GET
+    $urlCompleta = $url . "?token=$token.$secret_key&phone=" . trim($numero) . "&message=$mensagemCodificada";
+
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $urlCompleta);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HEADER, false);
+    curl_setopt($ch, CURLOPT_FAILONERROR, false);
+
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    
+    if (curl_errno($ch)) {
+        error_log("Erro cURL: " . curl_error($ch));
+        curl_close($ch);
+        return false;
+    }
+    
+    curl_close($ch);
+    if ($httpCode === 200) {
+        return [
+            'status' => 'sucesso',
+            'mensagem' => 'Mensagem enviada com sucesso.',
+            'body' => $response
+        ];
+    }
+    return [
+        'status' => $httpCode,
+        'body' => $response
+    ];
+}
+
+function formata_texto($produtos, $valor_total, $pedido_id, $nome_user, $userId) {
+    // Cabeçalho da mensagem
+    $mensagem = "📦 *Pedido #$pedido_id* 📦\n";
+    $mensagem .= "Cliente: *$nome_user*\n";
+    $mensagem .= "Id cliente: *$userId*\n\n";
+    $mensagem .= "📋 *Itens do Pedido:*\n";
+    
+    // Adiciona cada produto à mensagem
+    foreach ($produtos as $produto) {
+        $nome = $produto['nome_prod'];
+        $quantidade = $produto['quantidade'];
+        $codigo = $produto['codigo'];
+        $cor = $produto['cor'];
+        $valor_unit = number_format(floatval($produto['valor_unitario']), 2, ',', '.');
+        $total_item = number_format(floatval($produto['total_item']), 2, ',', '.');
+        
+        $mensagem .= "   Nome: $nome\n";
+        $mensagem .= "   Código: $codigo\n";
+        $mensagem .= "   Cor: $cor\n";
+        $mensagem .= "   Quantidade: $quantidade\n";
+        $mensagem .= "   Valor Unitário: R$ $valor_unit\n";
+        $mensagem .= "   Total do Item: R$ $total_item\n\n";
+    }
+    
+    // Adiciona o total do pedido
+    $valor_total_formatado = number_format(floatval($valor_total), 2, ',', '.');
+    $mensagem .= "💵 *Total do Pedido: R$ $valor_total_formatado*";
+    
+    return $mensagem;
+}
+
 ?>

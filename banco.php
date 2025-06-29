@@ -37,7 +37,7 @@ function verificaUsuario($email, $senha) {
             } else {
                 return [
                     'status' => 'erro',
-                    'mensagem' => 'Usuario nao encontrado. '
+                    'mensagem' => 'Usuário não encontrado. '
                 ];
             }
         } catch (PDOException $e) {
@@ -135,15 +135,26 @@ function consultaProdutos($busca, $estado, $regime, $nivel) {
 
     if ($conn) {
         try {
-            // Quebra a busca em palavras
-            $palavras = explode(' ', trim($busca ?? ''));
-
-            // Cria uma condição dinâmica para o LIKE com várias palavras
-            $condicoes = [];
-            foreach ($palavras as $palavra) {
-                $condicoes[] = "p.nome LIKE :busca_$palavra";
+            // Remove espaços extras e prepara a busca (convertendo para minúsculas)
+            $busca = mb_strtolower(trim($busca ?? ''), 'UTF-8');
+            
+            // Se a busca não estiver vazia, cria as condições
+            if (!empty($busca)) {
+                // Quebra a busca em palavras
+                $palavras = preg_split('/\s+/', $busca);
+                
+                // Cria uma condição dinâmica para o LIKE com várias palavras
+                $condicoes = [];
+                foreach ($palavras as $palavra) {
+                    // Usando LOWER() na coluna e buscando em minúsculas
+                    $condicoes[] = "LOWER(p.nome) LIKE :busca_$palavra";
+                    $condicoes[] = "LOWER(p.nome) LIKE :busca_partial_$palavra";
+                }
+                $condicoesBusca = implode(' OR ', $condicoes);
+            } else {
+                // Se não houver busca, retorna todos os produtos ativos
+                $condicoesBusca = "1=1";
             }
-            $condicoesBusca = implode(' OR ', $condicoes);
 
             if ($nivel === 'cliente') {
                 $query = "
@@ -158,8 +169,11 @@ function consultaProdutos($busca, $estado, $regime, $nivel) {
                 $stmt->bindParam(':regime', $regime);
 
                 // Adiciona os parâmetros dinâmicos para cada palavra
-                foreach ($palavras as $key => $palavra) {
-                    $stmt->bindValue(":busca_$palavra", "%$palavra%");
+                if (!empty($busca)) {
+                    foreach ($palavras as $palavra) {
+                        $stmt->bindValue(":busca_$palavra", "%$palavra%");
+                        $stmt->bindValue(":busca_partial_$palavra", "%$palavra%");
+                    }
                 }
             } else { // Admin
                 $query = "
@@ -170,8 +184,11 @@ function consultaProdutos($busca, $estado, $regime, $nivel) {
                 $stmt = $conn->prepare($query);
 
                 // Adiciona os parâmetros dinâmicos para cada palavra
-                foreach ($palavras as $key => $palavra) {
-                    $stmt->bindValue(":busca_$palavra", "%$palavra%");
+                if (!empty($busca)) {
+                    foreach ($palavras as $palavra) {
+                        $stmt->bindValue(":busca_$palavra", "%$palavra%");
+                        $stmt->bindValue(":busca_partial_$palavra", "%$palavra%");
+                    }
                 }
             }
 
@@ -194,7 +211,7 @@ function consultaProdutos($busca, $estado, $regime, $nivel) {
         } catch (PDOException $e) {
             return [
                 'status' => 'erro',
-                'mensagem' => 'Erro no banco.'
+                'mensagem' => 'Erro no banco: ' . $e->getMessage()
             ];
         }
     }
@@ -1016,14 +1033,14 @@ function criarPedido($userId) {
             $carrinhoId = $carrinho['id'];
 
             // 2. Buscar itens do carrinho
-            $stmt = $conn->prepare("SELECT ic.produto_id, ic.quantidade, ic.valor_unitario, 
+            $stmt = $conn->prepare("SELECT ic.produto_id, p.nome AS nome_prod, p.codigo, p.cor, ic.quantidade, ic.valor_unitario, 
                                     (ic.quantidade * ic.valor_unitario) AS total_item
                                     FROM item_carrinho ic
+                                    JOIN produtos p ON ic.produto_id = p.id
                                     WHERE ic.carrinho_id = :carrinhoId");
             $stmt->bindParam(':carrinhoId', $carrinhoId, PDO::PARAM_INT);
             $stmt->execute();
             $itensCarrinho = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
             if (empty($itensCarrinho)) {
                 return [
                     'status' => 'erro',
@@ -1062,10 +1079,23 @@ function criarPedido($userId) {
             $stmt->bindParam(':carrinhoId', $carrinhoId, PDO::PARAM_INT);
             $stmt->execute();
 
+            $stmt2 = $conn->prepare("SELECT numero FROM clientes WHERE tipo = 'admin' LIMIT 1");
+            $stmt2->execute();
+            $numeroTelefone = $stmt2->fetch(PDO::FETCH_ASSOC);
+
+            $stmt3 = $conn->prepare("SELECT nome FROM clientes WHERE id = :userId LIMIT 1");
+            $stmt3->bindParam(':userId', $userId, PDO::PARAM_INT);
+            $stmt3->execute();
+            $nomeCliente = $stmt3->fetch(PDO::FETCH_ASSOC);
+
             return [
                 'status' => 'sucesso',
                 'mensagem' => 'Pedido criado com sucesso.',
-                'pedido_id' => $pedidoId
+                'pedido_id' => $pedidoId,
+                'produtos' => $itensCarrinho,
+                'valor_total' => $valorTotal,
+                'numero' => $numeroTelefone['numero'],
+                'nome_cliente' => $nomeCliente['nome']
             ];
         } catch (PDOException $e) {
             return [
@@ -1161,6 +1191,45 @@ function alteraSenhaUser($id, $nova_senha) {
             return [
                 'status' => 'erro',
                 'mensagem' => 'Erro no banco ao alterar usuário.'
+            ];
+        }
+    }
+
+    return [
+        'status' => 'erro',
+        'mensagem' => 'Conexão ao banco não disponível.'
+    ];
+}
+function alteraNumeroBot($id, $numero) {
+    global $conn; // Usa a conexão global
+
+    if ($conn) {
+        try {
+            $stmt = $conn->prepare("SELECT * FROM clientes WHERE id = :id");
+            $stmt->bindParam(':id', $id, PDO::PARAM_INT);
+            $stmt->execute();
+            $verificaUsuario = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$verificaUsuario) {
+                return [
+                    'status' => 'erro',
+                    'mensagem' => 'Nenhum usuário encontrado.'
+                ];
+            }
+
+            $stmt = $conn->prepare("UPDATE clientes SET numero = :numero WHERE id = :id");
+            $stmt->bindParam(':id', $id, PDO::PARAM_INT);
+            $stmt->bindParam(':numero', $numero, PDO::PARAM_STR);
+            $stmt->execute();
+
+            return [
+                'status' => 'sucesso',
+                'mensagem' => 'Número atualizado com sucesso.'
+            ];
+        } catch (PDOException $e) {
+            return [
+                'status' => 'erro',
+                'mensagem' => 'Erro no banco ao alterar número.'
             ];
         }
     }
